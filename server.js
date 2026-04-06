@@ -48,9 +48,7 @@ const contactLimiter = rateLimit({
 // }
 function makeTransporter() {
   return nodemailer.createTransport({
-    host: 'smtp.gmail.com',
-    port: 465,        // changed from 587
-    secure: true,     // changed from false
+    service: 'gmail',  // let nodemailer handle gmail settings automatically
     auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
   });
 }

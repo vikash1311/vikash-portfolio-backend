@@ -1,21 +1,20 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const nodemailer = require('nodemailer');
 const rateLimit = require('express-rate-limit');
+const { Resend } = require('resend');
 
 const app = express();
-app.set('trust proxy', 1); // fix for Render's proxy
+app.set('trust proxy', 1);
 const PORT = process.env.PORT || 5000;
 
-// Startup env check
-const missing = ['EMAIL_USER','EMAIL_PASS','EMAIL_TO'].filter(k => !process.env[k]);
-if (missing.length) console.warn('⚠️  Missing .env keys:', missing.join(', '));
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 app.use(express.json());
 const ALLOWED_ORIGINS = [
   'http://localhost:3000',
-  'https://playful-donut-3ae0e8.netlify.app',
+  //'https://playful-donut-3ae0e8.netlify.app',
+  'https://vikash-gautam.netlify.app',
   process.env.FRONTEND_URL,
 ].filter(Boolean);
 
@@ -25,7 +24,7 @@ app.use(cors({
     if (ALLOWED_ORIGINS.includes(origin) || origin.endsWith('.netlify.app')) {
       return callback(null, true);
     }
-    return callback(null, true); // allow all for now
+    return callback(null, true);
   },
   methods: ['GET', 'POST'],
   credentials: true
@@ -36,37 +35,11 @@ const contactLimiter = rateLimit({
   message: { success: false, message: 'Too many messages. Try again in 15 minutes.' }
 });
 
-// Build transporter — called fresh per request so .env changes take effect
-// function makeTransporter() {
-//   return nodemailer.createTransport({
-//     host: 'smtp.gmail.com',
-//     port: 587,
-//     secure: false,
-//     auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
-//     tls: { rejectUnauthorized: false }
-//   });
-// }
-function makeTransporter() {
-  return nodemailer.createTransport({
-    service: 'gmail',  // let nodemailer handle gmail settings automatically
-    auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
-  });
-}
-
-// Health check — also tells you exactly what's wrong
-app.get('/api/health', async (req, res) => {
-  const t = makeTransporter();
-  let mailOk = false, mailError = null;
-  try { await t.verify(); mailOk = true; }
-  catch (e) { mailError = e.message; }
+app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
-    env: {
-      EMAIL_USER: process.env.EMAIL_USER || '❌ not set',
-      EMAIL_PASS: process.env.EMAIL_PASS ? '✅ set' : '❌ not set',
-      EMAIL_TO:   process.env.EMAIL_TO   || '❌ not set',
-    },
-    smtp: mailOk ? '✅ connected' : `❌ ${mailError}`,
+    resend: process.env.RESEND_API_KEY ? '✅ set' : '❌ not set',
+    EMAIL_TO: process.env.EMAIL_TO || '❌ not set',
   });
 });
 
@@ -80,23 +53,12 @@ app.post('/api/contact', contactLimiter, async (req, res) => {
   if (message.length > 2000)
     return res.status(400).json({ success: false, message: 'Message too long.' });
 
-  const t = makeTransporter();
-
-  // Verify SMTP before trying to send — gives a clear error immediately
-  try { await t.verify(); }
-  catch (e) {
-    console.error('❌ SMTP verify failed:', e.message);
-    return res.status(500).json({
-      success: false,
-      message: `Mail config error: ${e.message}. Check your Gmail App Password in .env`
-    });
-  }
-
   try {
-    await t.sendMail({
-      from: `"Portfolio Contact" <${process.env.EMAIL_USER}>`,
+    // Email to you
+    await resend.emails.send({
+      from: 'Portfolio Contact <onboarding@resend.dev>',
       to: process.env.EMAIL_TO,
-      replyTo: email,
+      reply_to: email,
       subject: `[Portfolio] ${subject || 'New message'} — from ${name}`,
       html: `
         <div style="font-family:'Segoe UI',sans-serif;max-width:600px;margin:0 auto;border-radius:12px;overflow:hidden;border:1px solid #eee;">
@@ -110,17 +72,17 @@ app.post('/api/contact', contactLimiter, async (req, res) => {
               <tr><td style="padding:8px 0;color:#888;">Subject</td><td>${subject || '—'}</td></tr>
             </table>
             <hr style="border:none;border-top:1px solid #eee;margin:1.5rem 0;">
-            <p style="font-size:0.8rem;color:#aaa;text-transform:uppercase;letter-spacing:0.1em;margin:0 0 0.8rem;">Message</p>
             <p style="color:#333;line-height:1.8;white-space:pre-wrap;">${message}</p>
           </div>
           <div style="padding:1rem 2rem;background:#f9f9f9;text-align:center;font-size:0.75rem;color:#bbb;">
-            ${new Date().toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})} IST
+            ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST
           </div>
         </div>`
     });
 
-    await t.sendMail({
-      from: `"Vikash Gautam" <${process.env.EMAIL_USER}>`,
+    // Auto-reply to sender
+    await resend.emails.send({
+      from: 'Vikash Gautam <onboarding@resend.dev>',
       to: email,
       subject: `Got your message, ${name.split(' ')[0]}! 👋`,
       html: `
@@ -138,11 +100,11 @@ app.post('/api/contact', contactLimiter, async (req, res) => {
         </div>`
     });
 
-    console.log(`✅ Mail sent — from ${name} <${email}>`);
+    console.log(`✅ Mail sent via Resend — from ${name} <${email}>`);
     res.json({ success: true, message: 'Message sent successfully!' });
 
   } catch (error) {
-    console.error('❌ sendMail failed:', error.message);
+    console.error('❌ Resend failed:', error.message);
     res.status(500).json({ success: false, message: `Failed to send: ${error.message}` });
   }
 });

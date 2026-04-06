@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const { Resend } = require('resend');
+const nodemailer = require('nodemailer');
 
 const app = express();
 app.set('trust proxy', 1);
@@ -10,22 +11,22 @@ const PORT = process.env.PORT || 5000;
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
+function makeBrevoTransporter() {
+  return nodemailer.createTransport({
+    host: 'smtp-relay.brevo.com',
+    port: 587,
+    secure: false,
+    auth: {
+      user: process.env.BREVO_USER,
+      pass: process.env.BREVO_PASS,
+    },
+  });
+}
+
 app.use(express.json());
-const ALLOWED_ORIGINS = [
-  'http://localhost:3000',
-  //'https://playful-donut-3ae0e8.netlify.app',
-  'https://vikash-gautam.netlify.app',
-  process.env.FRONTEND_URL,
-].filter(Boolean);
 
 app.use(cors({
-  origin: function(origin, callback) {
-    if (!origin) return callback(null, true);
-    if (ALLOWED_ORIGINS.includes(origin) || origin.endsWith('.netlify.app')) {
-      return callback(null, true);
-    }
-    return callback(null, true);
-  },
+  origin: function(origin, callback) { return callback(null, true); },
   methods: ['GET', 'POST'],
   credentials: true
 }));
@@ -39,6 +40,7 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     resend: process.env.RESEND_API_KEY ? '✅ set' : '❌ not set',
+    brevo: process.env.BREVO_USER ? '✅ set' : '❌ not set',
     EMAIL_TO: process.env.EMAIL_TO || '❌ not set',
   });
 });
@@ -54,7 +56,7 @@ app.post('/api/contact', contactLimiter, async (req, res) => {
     return res.status(400).json({ success: false, message: 'Message too long.' });
 
   try {
-    // Email to you
+    // 1. Notify YOU via Resend
     await resend.emails.send({
       from: 'Portfolio Contact <onboarding@resend.dev>',
       to: process.env.EMAIL_TO,
@@ -80,9 +82,10 @@ app.post('/api/contact', contactLimiter, async (req, res) => {
         </div>`
     });
 
-    // Auto-reply to sender
-    await resend.emails.send({
-      from: 'Vikash Gautam <onboarding@resend.dev>',
+    // 2. Auto-reply to VISITOR via Brevo
+    const brevo = makeBrevoTransporter();
+    await brevo.sendMail({
+      from: `"Vikash Gautam" <${process.env.BREVO_USER}>`,
       to: email,
       subject: `Got your message, ${name.split(' ')[0]}! 👋`,
       html: `
@@ -100,11 +103,11 @@ app.post('/api/contact', contactLimiter, async (req, res) => {
         </div>`
     });
 
-    console.log(`✅ Mail sent via Resend — from ${name} <${email}>`);
+    console.log(`✅ Mail sent — from ${name} <${email}>`);
     res.json({ success: true, message: 'Message sent successfully!' });
 
   } catch (error) {
-    console.error('❌ Resend failed:', error.message);
+    console.error('❌ Mail failed:', error.message);
     res.status(500).json({ success: false, message: `Failed to send: ${error.message}` });
   }
 });

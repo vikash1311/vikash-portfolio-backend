@@ -5,6 +5,7 @@ const nodemailer = require('nodemailer');
 const rateLimit = require('express-rate-limit');
 
 const app = express();
+app.set('trust proxy', 1); // fix for Render's proxy
 const PORT = process.env.PORT || 5000;
 
 // Startup env check
@@ -36,13 +37,21 @@ const contactLimiter = rateLimit({
 });
 
 // Build transporter — called fresh per request so .env changes take effect
+// function makeTransporter() {
+//   return nodemailer.createTransport({
+//     host: 'smtp.gmail.com',
+//     port: 587,
+//     secure: false,
+//     auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
+//     tls: { rejectUnauthorized: false }
+//   });
+// }
 function makeTransporter() {
   return nodemailer.createTransport({
     host: 'smtp.gmail.com',
-    port: 587,
-    secure: false,
+    port: 465,        // changed from 587
+    secure: true,     // changed from false
     auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
-    tls: { rejectUnauthorized: false }
   });
 }
 

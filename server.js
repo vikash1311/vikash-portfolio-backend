@@ -3,7 +3,9 @@ const express = require('express');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const { Resend } = require('resend');
-const SibApiV3Sdk = require('@getbrevo/brevo');
+const brevoSDK = require('@getbrevo/brevo');
+const brevoClient = brevoSDK.ApiClient.instance;
+brevoClient.authentications['api-key'].apiKey = process.env.BREVO_API_KEY;
 
 const app = express();
 app.set('trust proxy', 1);
@@ -16,9 +18,7 @@ if (missing.length) console.warn('⚠️  Missing .env keys:', missing.join(', '
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 async function sendAutoReply(name, email) {
-  const apiInstance = new SibApiV3Sdk.TransactionalEmailsApi();
-  apiInstance.authentications['apiKey'].apiKey = process.env.BREVO_API_KEY;
-
+  const apiInstance = new brevoSDK.TransactionalEmailsApi();
   await apiInstance.sendTransacEmail({
     sender: { name: 'Vikash Gautam', email: process.env.EMAIL_TO },
     to: [{ email, name }],

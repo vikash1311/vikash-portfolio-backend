@@ -3,27 +3,43 @@ const express = require('express');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const { Resend } = require('resend');
-const nodemailer = require('nodemailer');
+const SibApiV3Sdk = require('@getbrevo/brevo');
 
 const app = express();
 app.set('trust proxy', 1);
 const PORT = process.env.PORT || 5000;
 
 // Startup env check
-const missing = ['RESEND_API_KEY','BREVO_USER','BREVO_PASS','EMAIL_TO'].filter(k => !process.env[k]);
+const missing = ['RESEND_API_KEY','BREVO_API_KEY','EMAIL_TO'].filter(k => !process.env[k]);
 if (missing.length) console.warn('⚠️  Missing .env keys:', missing.join(', '));
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-function makeBrevoTransporter() {
-  return nodemailer.createTransport({
-    host: 'smtp-relay.brevo.com',
-    port: 465,
-    secure: true,
-    auth: {
-      user: process.env.BREVO_USER,
-      pass: process.env.BREVO_PASS,
-    },
+async function sendAutoReply(name, email) {
+  const apiInstance = new SibApiV3Sdk.TransactionalEmailsApi();
+  apiInstance.authentications['apiKey'].apiKey = process.env.BREVO_API_KEY;
+
+  await apiInstance.sendTransacEmail({
+    sender: { name: 'Vikash Gautam', email: process.env.EMAIL_TO },
+    to: [{ email, name }],
+    subject: `Got your message, ${name.split(' ')[0]}! 👋`,
+    htmlContent: `
+      <div style="font-family:'Segoe UI',sans-serif;max-width:600px;margin:0 auto;">
+        <div style="background:linear-gradient(135deg,#1A6CFF,#00D4AA);padding:2rem;border-radius:12px 12px 0 0;text-align:center;">
+          <h1 style="color:white;margin:0;font-size:1.3rem;">Thanks for reaching out!</h1>
+        </div>
+        <div style="padding:2rem;background:white;border-radius:0 0 12px 12px;border:1px solid #eee;border-top:none;">
+          <p style="color:#333;line-height:1.8;">Hey ${name.split(' ')[0]},</p>
+          <p style="color:#333;line-height:1.8;">Got your message — I'll reply within 24–48 hours.</p>
+          <p style="color:#333;line-height:1.8;">Check out my work on
+            <a href="https://github.com/vikash1311" style="color:#1A6CFF;">GitHub</a> in the meantime.
+          </p>
+          <p style="color:#333;line-height:1.8;margin-top:2rem;">
+            Best,<br><strong>Vikash Gautam</strong><br>
+            <span style="color:#888;font-size:0.85rem;">Full Stack Developer · Nagpur</span>
+          </p>
+        </div>
+      </div>`
   });
 }
 
@@ -53,24 +69,14 @@ const contactLimiter = rateLimit({
   message: { success: false, message: 'Too many messages. Try again in 15 minutes.' }
 });
 
-app.get('/api/health', async (req, res) => {
-  let brevoOk = false, brevoError = null;
-  try {
-    const t = makeBrevoTransporter();
-    await t.verify();
-    brevoOk = true;
-  } catch (e) {
-    brevoError = e.message;
-  }
+app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     env: {
       RESEND_API_KEY: process.env.RESEND_API_KEY ? '✅ set' : '❌ not set',
-      BREVO_USER:     process.env.BREVO_USER     || '❌ not set',
-      BREVO_PASS:     process.env.BREVO_PASS     ? '✅ set' : '❌ not set',
-      EMAIL_TO:       process.env.EMAIL_TO       || '❌ not set',
-    },
-    brevo_smtp: brevoOk ? '✅ connected' : `❌ ${brevoError}`,
+      BREVO_API_KEY:  process.env.BREVO_API_KEY  ? '✅ set' : '❌ not set',
+      EMAIL_TO:       process.env.EMAIL_TO        || '❌ not set',
+    }
   });
 });
 
@@ -112,30 +118,8 @@ app.post('/api/contact', contactLimiter, async (req, res) => {
         </div>`
     });
 
-    // 2. Auto-reply to VISITOR via Brevo
-    const brevo = makeBrevoTransporter();
-    await brevo.sendMail({
-      from: `"Vikash Gautam" <${process.env.BREVO_USER}>`,
-      to: email,
-      subject: `Got your message, ${name.split(' ')[0]}! 👋`,
-      html: `
-        <div style="font-family:'Segoe UI',sans-serif;max-width:600px;margin:0 auto;">
-          <div style="background:linear-gradient(135deg,#1A6CFF,#00D4AA);padding:2rem;border-radius:12px 12px 0 0;text-align:center;">
-            <h1 style="color:white;margin:0;font-size:1.3rem;">Thanks for reaching out!</h1>
-          </div>
-          <div style="padding:2rem;background:white;border-radius:0 0 12px 12px;border:1px solid #eee;border-top:none;">
-            <p style="color:#333;line-height:1.8;">Hey ${name.split(' ')[0]},</p>
-            <p style="color:#333;line-height:1.8;">Got your message — I'll reply within 24–48 hours.</p>
-            <p style="color:#333;line-height:1.8;">Check out my work on 
-              <a href="https://github.com/vikash1311" style="color:#1A6CFF;">GitHub</a> in the meantime.
-            </p>
-            <p style="color:#333;line-height:1.8;margin-top:2rem;">
-              Best,<br><strong>Vikash Gautam</strong><br>
-              <span style="color:#888;font-size:0.85rem;">Full Stack Developer · Nagpur</span>
-            </p>
-          </div>
-        </div>`
-    });
+    // 2. Auto-reply to VISITOR via Brevo HTTP API
+    await sendAutoReply(name, email);
 
     console.log(`✅ Both mails sent — from ${name} <${email}>`);
     res.json({ success: true, message: 'Message sent successfully!' });

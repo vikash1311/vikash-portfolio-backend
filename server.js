@@ -3,9 +3,6 @@ const express = require('express');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const { Resend } = require('resend');
-const brevoSDK = require('@getbrevo/brevo');
-const brevoClient = brevoSDK.ApiClient.instance;
-brevoClient.authentications['api-key'].apiKey = process.env.BREVO_API_KEY;
 
 const app = express();
 app.set('trust proxy', 1);
@@ -18,29 +15,41 @@ if (missing.length) console.warn('⚠️  Missing .env keys:', missing.join(', '
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 async function sendAutoReply(name, email) {
-  const apiInstance = new brevoSDK.TransactionalEmailsApi();
-  await apiInstance.sendTransacEmail({
-    sender: { name: 'Vikash Gautam', email: process.env.EMAIL_TO },
-    to: [{ email, name }],
-    subject: `Got your message, ${name.split(' ')[0]}! 👋`,
-    htmlContent: `
-      <div style="font-family:'Segoe UI',sans-serif;max-width:600px;margin:0 auto;">
-        <div style="background:linear-gradient(135deg,#1A6CFF,#00D4AA);padding:2rem;border-radius:12px 12px 0 0;text-align:center;">
-          <h1 style="color:white;margin:0;font-size:1.3rem;">Thanks for reaching out!</h1>
-        </div>
-        <div style="padding:2rem;background:white;border-radius:0 0 12px 12px;border:1px solid #eee;border-top:none;">
-          <p style="color:#333;line-height:1.8;">Hey ${name.split(' ')[0]},</p>
-          <p style="color:#333;line-height:1.8;">Got your message — I'll reply within 24–48 hours.</p>
-          <p style="color:#333;line-height:1.8;">Check out my work on
-            <a href="https://github.com/vikash1311" style="color:#1A6CFF;">GitHub</a> in the meantime.
-          </p>
-          <p style="color:#333;line-height:1.8;margin-top:2rem;">
-            Best,<br><strong>Vikash Gautam</strong><br>
-            <span style="color:#888;font-size:0.85rem;">Full Stack Developer · Nagpur</span>
-          </p>
-        </div>
-      </div>`
+  const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      'accept': 'application/json',
+      'api-key': process.env.BREVO_API_KEY,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      sender: { name: 'Vikash Gautam', email: process.env.EMAIL_TO },
+      to: [{ email, name }],
+      subject: `Got your message, ${name.split(' ')[0]}! 👋`,
+      htmlContent: `
+        <div style="font-family:'Segoe UI',sans-serif;max-width:600px;margin:0 auto;">
+          <div style="background:linear-gradient(135deg,#1A6CFF,#00D4AA);padding:2rem;border-radius:12px 12px 0 0;text-align:center;">
+            <h1 style="color:white;margin:0;font-size:1.3rem;">Thanks for reaching out!</h1>
+          </div>
+          <div style="padding:2rem;background:white;border-radius:0 0 12px 12px;border:1px solid #eee;border-top:none;">
+            <p style="color:#333;line-height:1.8;">Hey ${name.split(' ')[0]},</p>
+            <p style="color:#333;line-height:1.8;">Got your message — I'll reply within 24–48 hours.</p>
+            <p style="color:#333;line-height:1.8;">Check out my work on
+              <a href="https://github.com/vikash1311" style="color:#1A6CFF;">GitHub</a> in the meantime.
+            </p>
+            <p style="color:#333;line-height:1.8;margin-top:2rem;">
+              Best,<br><strong>Vikash Gautam</strong><br>
+              <span style="color:#888;font-size:0.85rem;">Full Stack Developer · Nagpur</span>
+            </p>
+          </div>
+        </div>`
+    })
   });
+
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.message || 'Brevo API error');
+  }
 }
 
 app.use(express.json());
